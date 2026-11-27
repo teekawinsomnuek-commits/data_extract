@@ -9,9 +9,8 @@ python scripts/load_raw.py
 รันซ้ำได้กี่ครั้งก็ได้ (CREATE OR REPLACE) ผลลัพธ์เหมือนเดิมทุกครั้ง
 """
 import sys
+from importlib import import_module
 from pathlib import Path
-
-import duckdb
 
 # # ให้พิมพ์ภาษาไทยได้บน Windows ทุกรุ่น
 # sys.stdout.reconfigure(encoding="utf-8")
@@ -19,16 +18,17 @@ import duckdb
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 DB_PATH = ROOT / "northwind.duckdb"
-my_dict = {'name':'shogun',
-'secondname': 'J.'           
-}
-print(f"My name is my_dict['name']")
 
 # ตารางใน schema raw → ไฟล์ต้นทาง (มาจาก 2 ระบบ)
 SOURCES = {
 # แหล่ง A: ระบบขายปัจจุบัน
 "customer": "raw/customer.csv",
 "employees": "raw/employees.csv",
+"suppliers": "raw/suppliers.csv",
+"shippers": "raw/shippers.csv",
+"products": "raw/products.csv",
+"orders": "raw/orders.csv",
+"order_details": "raw/order_details.csv",
 # แหล่ง B: ระบบขายเดิม (มีเฉพาะใบสั่งซื้อและรายการสินค้า)
 "legacy_orders": "legacy/orders.csv",
 "legacy_order_details": "legacy/order_details.csv",
@@ -36,30 +36,37 @@ SOURCES = {
 
 
 def main() -> None:
-con = duckdb.connect(str(DB_PATH))
-con.execute("CREATE SCHEMA IF NOT EXISTS raw")
+	try:
+		duckdb = import_module("duckdb")
+	except ModuleNotFoundError as exc:
+		if exc.name != "duckdb":
+			raise
+		raise SystemExit("DuckDB is required. Install it with: python -m pip install duckdb") from exc
 
-print(f"โหลดข้อมูลเข้า {DB_PATH.name}")
-for table, relative_path in SOURCES.items():
-csv_path = DATA_DIR / relative_path
-if not csv_path.exists():
-raise FileNotFoundError(f"ไม่พบไฟล์ {csv_path}")
+	con = duckdb.connect(str(DB_PATH))
+	con.execute("CREATE SCHEMA IF NOT EXISTS raw")
 
-# Extract: read_csv อ่านไฟล์และเดาชนิดข้อมูลให้
-# Load: CREATE OR REPLACE TABLE เขียนทับตารางเดิมทั้งตาราง (full refresh)
-con.execute(
-f"""
+	print(f"โหลดข้อมูลเข้า {DB_PATH.name}")
+	for table, relative_path in SOURCES.items():
+		csv_path = DATA_DIR / relative_path
+		if not csv_path.exists():
+			raise FileNotFoundError(f"ไม่พบไฟล์ {csv_path}")
+
+		# Extract: read_csv อ่านไฟล์และเดาชนิดข้อมูลให้
+		# Load: CREATE OR REPLACE TABLE เขียนทับตารางเดิมทั้งตาราง (full refresh)
+		con.execute(
+			f"""
 CREATE OR REPLACE TABLE raw.{table} AS
 SELECT *
 FROM read_csv('{csv_path.as_posix()}', header = true)
 """
-)
-n = con.execute(f"SELECT COUNT(*) FROM raw.{table}").fetchall()[0][0]
-print(f" raw.{table:<22} {n:>6,} แถว")
+		)
+		n = con.execute(f"SELECT COUNT(*) FROM raw.{table}").fetchall()[0][0]
+		print(f" raw.{table:<22} {n:>6,} แถว")
 
-con.close()
-print("เสร็จแล้ว — ขั้นต่อไป: dbt run")
+	con.close()
+	print("เสร็จแล้ว — ขั้นต่อไป: dbt run")
 
 
 if __name__ == "__main__":
-main()
+	main()
